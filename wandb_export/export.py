@@ -1,22 +1,23 @@
 from collections import defaultdict
 import logging
+from pathlib import Path
 import sys
 from typing import Dict
 import hydra
 from omegaconf import OmegaConf, DictConfig
 import wandb
 from wandb.apis import public
-import pandas as pd
 import numpy as np
 import os
 import yaml
 import json
 import cProfile
+import pandas as pd # required for the pandas=True argument in run.history
 
 # Import path constants for config management
 from wandb_export.utils_config import (
     assert_config_dir_exists,
-    PATH_CONFIGS,
+    DIR_CONFIGS,
     NAME_CONFIG_DEFAULT,
 )
 
@@ -37,10 +38,15 @@ def convert_numpy(obj):
     return obj
 
 
+DIR_CONFIG_ABSOLUTE = str(Path.cwd() / DIR_CONFIGS)
+
 @hydra.main(
-    config_path=PATH_CONFIGS, config_name=NAME_CONFIG_DEFAULT, version_base="1.3.2"
+    config_path=DIR_CONFIG_ABSOLUTE,
+    config_name=NAME_CONFIG_DEFAULT,
+    version_base="1.3.2",
 )
 def export_wandb_data(config: DictConfig):
+
     # Resolve Hydra config
     config = OmegaConf.to_container(config, resolve=True)
 
@@ -53,7 +59,7 @@ def export_wandb_data(config: DictConfig):
     data_types: Dict[str, bool] = config["data_types"]
 
     # Export directory
-    export_dir = config.get("export_dir", "data/wandbpp_exports")
+    export_dir = config.get("export_dir", "data/wandb_export")
     os.makedirs(export_dir, exist_ok=True)
 
     logger.info(f"Fetching runs from W&B project: {wandb_project}...")
@@ -161,8 +167,6 @@ def export_wandb_data(config: DictConfig):
                     yaml.dump(run.config, f, default_flow_style=False)
                 logger.info(f"Saved config to {config_path_yaml}")
 
-            # breakpoint()
-
         except Exception as e:
             logger.error(f"Error processing run {run_name}: {e}")
 
@@ -177,8 +181,9 @@ def main():
     os.makedirs("logs", exist_ok=True)
     pr.dump_stats(log_file_cprofile)
     logger.info(
-        f"[PROFILING] Profile stats dumped to {log_file_cprofile}. You can visualize it using 'snakeviz {log_file_cprofile}'"
+        f"Profile stats dumped to {log_file_cprofile}. You can visualize it using 'snakeviz {log_file_cprofile}'"
     )
+    logger.info("Export complete.")
 
 
 if __name__ == "__main__":
