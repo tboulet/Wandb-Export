@@ -1,17 +1,14 @@
 # The name of the WandB project to use.
-project: timotheboulet/EcoJAX
+project: user/project
 
 # The filters that will be applied to the config for accepting a run, following WandB filters.
-filters:
-  "summary_metrics._step":
-    "$gte": 50000
-  "config.benchmark_name": bench17_fp_hc
+filters: {}
 
 # How many samples maximal to use for the plot.
 samples: 10000
 
 # The minimum number of metrics to have in the run to be considered.
-min_n_metrics: 10
+min_n_metrics: 0
 
 # Which data types to log.
 data_types:

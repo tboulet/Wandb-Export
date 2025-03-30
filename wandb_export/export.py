@@ -13,12 +13,20 @@ import yaml
 import json
 import cProfile
 
+# Import path constants for config management
+from wandb_export.utils_config import (
+    assert_config_dir_exists,
+    PATH_CONFIGS,
+    NAME_CONFIG_DEFAULT,
+)
+
 # Set up logging configuration
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
 
 def convert_numpy(obj):
     """Convert numpy types to native Python types for JSON serialization."""
@@ -28,8 +36,11 @@ def convert_numpy(obj):
         return obj.tolist()
     return obj
 
-@hydra.main(config_path="../configs_export", config_name="config_default.yaml")
-def main(config: DictConfig):
+
+@hydra.main(
+    config_path=PATH_CONFIGS, config_name=NAME_CONFIG_DEFAULT, version_base="1.3.2"
+)
+def export_wandb_data(config: DictConfig):
     # Resolve Hydra config
     config = OmegaConf.to_container(config, resolve=True)
 
@@ -39,14 +50,14 @@ def main(config: DictConfig):
     filters = config.get("filters", None)
     samples = config.get("samples", 10000)
     min_n_metrics = config.get("min_n_metrics", 1)
-    data_types : Dict[str, bool] = config["data_types"]
-    
+    data_types: Dict[str, bool] = config["data_types"]
+
     # Export directory
     export_dir = config.get("export_dir", "data/wandbpp_exports")
     os.makedirs(export_dir, exist_ok=True)
 
-    logger.info(f"Fetching runs from W&B project: {wandb_project}...")    
-    
+    logger.info(f"Fetching runs from W&B project: {wandb_project}...")
+
     api = wandb.Api()
     runs = api.runs(
         path=os.path.join(entity, wandb_project),
@@ -55,57 +66,73 @@ def main(config: DictConfig):
 
     logger.info(f"Found {len(runs)} runs in project {wandb_project}.")
     logger.info(f"Exporting to {export_dir}...")
-    
+
     for run in runs:
         try:
             run: public.Run
             run_id = run.id
             run_name = run.name or run_id
             safe_run_name = run_name.replace("/", "_")
-            run_path = os.path.join(export_dir, safe_run_name)            
-            run_url = os.path.join("https://api.wandb.ai/files", entity, wandb_project, run_id)
-            
+            run_path = os.path.join(export_dir, safe_run_name)
+            run_url = os.path.join(
+                "https://api.wandb.ai/files", entity, wandb_project, run_id
+            )
+
             df = run.history(samples=samples, pandas=True)
 
             if len(df.columns) < min_n_metrics:
-                logger.info(f"Skipping run {run_name} (only {len(df.columns)} metrics logged)")
+                logger.info(
+                    f"Skipping run {run_name} (only {len(df.columns)} metrics logged)"
+                )
                 continue
-            
+
             os.makedirs(run_path, exist_ok=True)
             logger.info(f"Exporting run: {run_name} (ID: {run_id})")
 
             # Get the last logged step as reference
             step_max = df["_step"].max() if "_step" in df.columns else None
-            last_logged_data = df[df["_step"] == step_max].iloc[-1] if step_max is not None else None
-            
+            last_logged_data = (
+                df[df["_step"] == step_max].iloc[-1] if step_max is not None else None
+            )
+
             # Save metadata
             if data_types["metadata"]:
                 metadata_path = os.path.join(run_path, "metadata.yaml")
                 with open(metadata_path, "w") as f:
-                    yaml.dump({
-                        "id": run_id,
-                        "name": run_name,
-                        "url": run_url,
-                        "step_max": convert_numpy(step_max),
-                    }, f, default_flow_style=False)
+                    yaml.dump(
+                        {
+                            "id": run_id,
+                            "name": run_name,
+                            "url": run_url,
+                            "step_max": convert_numpy(step_max),
+                        },
+                        f,
+                        default_flow_style=False,
+                    )
                 logger.info(f"Saved metadata to {metadata_path}")
-                
+
             # Separate scalars, histograms, and images
             scalars = {}
             histograms = {}
             images_urls = {}
-            
+
             for col in df.columns:
                 if last_logged_data is not None and col in last_logged_data:
                     sample_value = last_logged_data[col]
                     if isinstance(sample_value, dict) and "_type" in sample_value:
-                        if data_types["histogram"] and sample_value["_type"] == "histogram":
+                        if (
+                            data_types["histogram"]
+                            and sample_value["_type"] == "histogram"
+                        ):
                             histograms[col] = df[col].dropna().tolist()
-                        elif data_types["image_url"] and sample_value["_type"] == "image-file":
+                        elif (
+                            data_types["image_url"]
+                            and sample_value["_type"] == "image-file"
+                        ):
                             images_urls[col] = df[col].dropna().tolist()
                     elif data_types["scalar"]:
                         scalars[col] = df[col].dropna().tolist()
-                
+
             # Save scalars to CSV
             if data_types["scalar"]:
                 scalar_df = df[list(scalars.keys())]
@@ -133,18 +160,26 @@ def main(config: DictConfig):
                 with open(config_path_yaml, "w") as f:
                     yaml.dump(run.config, f, default_flow_style=False)
                 logger.info(f"Saved config to {config_path_yaml}")
-            
+
             # breakpoint()
-            
+
         except Exception as e:
             logger.error(f"Error processing run {run_name}: {e}")
-    
+
     logger.info("Export complete.")
 
-if __name__ == "__main__":
+
+def main():
+    assert_config_dir_exists()
     with cProfile.Profile() as pr:
-        main()
+        export_wandb_data()
     log_file_cprofile = "logs/profile_stats.prof"
     os.makedirs("logs", exist_ok=True)
     pr.dump_stats(log_file_cprofile)
-    logger.info(f"[PROFILING] Profile stats dumped to {log_file_cprofile}. You can visualize it using 'snakeviz {log_file_cprofile}'")
+    logger.info(
+        f"[PROFILING] Profile stats dumped to {log_file_cprofile}. You can visualize it using 'snakeviz {log_file_cprofile}'"
+    )
+
+
+if __name__ == "__main__":
+    main()
